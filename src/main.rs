@@ -3,13 +3,14 @@ use image::{GenericImageView, ImageReader, imageops::FilterType::Gaussian};
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut img = ImageReader::open("toji.jpg")?.decode()?;
 
+    img = image::DynamicImage::resize(&img, 100, 100, Gaussian);
     print!("{:?}", img.dimensions());
-
-    img = image::DynamicImage::resize(&img, 150, 75, Gaussian);
 
     let gray = img.grayscale();
 
     let ramp = " .:-=+*#%@";
+    // let ramp = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
+    // let ramp = " .'`^\",:;Il!i~+_-?][}{1)(|\\/*tfjrxnuvczXYUJCLQ0OZmwqpdbkhao*#MW&8%B@$";
 
     let mut prev_y = 0;
     let magic_num = (ramp.len() - 1) as f64 / 255.0;
