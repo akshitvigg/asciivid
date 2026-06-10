@@ -24,7 +24,7 @@ fn resize_image(img: DynamicImage) -> DynamicImage {
 const RAMP: &str = " .:-=+*#%@";
 const MAGIC_NUM: f64 = (RAMP.len() - 1) as f64 / 255.0;
 
-fn brightness_to_ascii(pixel: u8) -> char {
+fn brightness_to_ascii(pixel: u16) -> char {
     let ramp_ind = (pixel) as f64 * MAGIC_NUM;
     let ramp_abs = ramp_ind.round();
     let ascii_char = RAMP.as_bytes()[ramp_abs as usize] as char;
@@ -33,15 +33,20 @@ fn brightness_to_ascii(pixel: u8) -> char {
 
 fn render_ascii(img: DynamicImage) {
     let mut prev_y = 0;
-    let gray = img.grayscale();
 
-    for (_, y, pixel) in gray.pixels() {
+    for (_, y, pixel) in img.pixels() {
+        let brightness = (pixel[0] as u16 + pixel[1] as u16 + pixel[2] as u16) / 3;
+
         if prev_y != y {
             print!("\n");
-            print!("{}", brightness_to_ascii(pixel[0]));
-        } else {
-            print!("{}", brightness_to_ascii(pixel[0]));
         }
+        print!(
+            "\x1b[38;2;{};{};{}m{}\x1b[0m",
+            pixel[0],
+            pixel[1],
+            pixel[2],
+            brightness_to_ascii(brightness)
+        );
 
         prev_y = y;
     }
