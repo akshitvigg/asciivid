@@ -1,6 +1,8 @@
 use crossterm::terminal::size;
 use image::{DynamicImage, GenericImageView, ImageError, imageops::FilterType::Lanczos3};
 use std::env;
+use std::fs;
+use std::path::{Path, PathBuf};
 use std::thread;
 use std::time::Duration;
 use terminal_size::terminal_size;
@@ -17,7 +19,7 @@ fn get_img_path() -> Result<String, String> {
     Ok(image_name.to_string())
 }
 
-fn load_image(path: &str) -> Result<DynamicImage, ImageError> {
+fn load_image(path: &Path) -> Result<DynamicImage, ImageError> {
     image::ImageReader::open(path)?.decode()
 }
 
@@ -60,27 +62,33 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let (w, h) = size()?;
     // let path = get_img_path()?;
 
-    let img1 = load_image("miku.jpg")?;
-    // print!("{:?}", img1.dimensions());
-    // print!("w={}, h={}", w, h);
-    let resized_img = resize_image(img1, w, h);
-    // print!("{:?}", resized_img.dimensions());
+    let mut frames: Vec<PathBuf> = fs::read_dir("/home/akira/marchFrames/")?
+        .map(|e| e.unwrap().path())
+        .collect();
 
-    let img2 = load_image("toji.jpg")?;
-    let _resized_img2 = resize_image(img2, w, h);
+    frames.sort();
 
-    loop {
+    for frame in frames {
+        let img = load_image(&frame)?;
+        let resized_img = resize_image(img, w, h);
         render_ascii(&resized_img);
-        thread::sleep(Duration::from_millis(100));
-        print!("\x1b[2J");
-
-        print!("\x1b[H");
-
-        render_ascii(&_resized_img2);
-        thread::sleep(Duration::from_millis(100));
+        thread::sleep(Duration::from_millis(33));
         print!("\x1b[2J");
         print!("\x1b[H");
     }
 
+    // loop {
+    //     render_ascii(&resized_img);
+    //     thread::sleep(Duration::from_millis(100));
+    //     print!("\x1b[2J");
+    //
+    //     print!("\x1b[H");
+    //
+    //     render_ascii(&_resized_img2);
+    //     thread::sleep(Duration::from_millis(100));
+    //     print!("\x1b[2J");
+    //     print!("\x1b[H");
+    // }
+    //
     Ok(())
 }
