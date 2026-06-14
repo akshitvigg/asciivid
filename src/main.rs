@@ -1,5 +1,9 @@
+use crossterm::terminal::size;
 use image::{DynamicImage, GenericImageView, ImageError, imageops::FilterType::Lanczos3};
 use std::env;
+use std::thread;
+use std::time::Duration;
+use terminal_size::terminal_size;
 
 fn get_img_path() -> Result<String, String> {
     let args: Vec<String> = env::args().collect();
@@ -17,21 +21,21 @@ fn load_image(path: &str) -> Result<DynamicImage, ImageError> {
     image::ImageReader::open(path)?.decode()
 }
 
-fn resize_image(img: DynamicImage) -> DynamicImage {
-    image::DynamicImage::resize(&img, 150, 75, Lanczos3)
+fn resize_image(img: DynamicImage, w: u16, h: u16) -> DynamicImage {
+    image::DynamicImage::resize_exact(&img, w as u32, h as u32, Lanczos3)
 }
 
-const RAMP: &str = " .:-=+*#%@";
+const RAMP: &str = " .,:;irsXA253hMHGS#9B&@";
 const MAGIC_NUM: f64 = (RAMP.len() - 1) as f64 / 255.0;
 
-fn brightness_to_ascii(pixel: u16) -> char {
-    let ramp_ind = (pixel) as f64 * MAGIC_NUM;
+fn brightness_to_ascii(brightness: u16) -> char {
+    let ramp_ind = (brightness) as f64 * MAGIC_NUM;
     let ramp_abs = ramp_ind.round();
     let ascii_char = RAMP.as_bytes()[ramp_abs as usize] as char;
-    return ascii_char;
+    ascii_char
 }
 
-fn render_ascii(img: DynamicImage) {
+fn render_ascii(img: &DynamicImage) {
     let mut prev_y = 0;
 
     for (_, y, pixel) in img.pixels() {
@@ -53,10 +57,30 @@ fn render_ascii(img: DynamicImage) {
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let path = get_img_path()?;
-    let img = load_image(&path)?;
-    let resized_img = resize_image(img);
-    render_ascii(resized_img);
+    let (w, h) = size()?;
+    // let path = get_img_path()?;
+
+    let img1 = load_image("miku.jpg")?;
+    // print!("{:?}", img1.dimensions());
+    // print!("w={}, h={}", w, h);
+    let resized_img = resize_image(img1, w, h);
+    // print!("{:?}", resized_img.dimensions());
+
+    let img2 = load_image("toji.jpg")?;
+    let _resized_img2 = resize_image(img2, w, h);
+
+    loop {
+        render_ascii(&resized_img);
+        thread::sleep(Duration::from_millis(100));
+        print!("\x1b[2J");
+
+        print!("\x1b[H");
+
+        render_ascii(&_resized_img2);
+        thread::sleep(Duration::from_millis(100));
+        print!("\x1b[2J");
+        print!("\x1b[H");
+    }
 
     Ok(())
 }
