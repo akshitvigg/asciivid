@@ -4,7 +4,7 @@ use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use terminal_size::terminal_size;
 
 fn get_img_path() -> Result<String, String> {
@@ -37,25 +37,29 @@ fn brightness_to_ascii(brightness: u16) -> char {
     ascii_char
 }
 
-fn render_ascii(img: &DynamicImage) {
+fn image_to_ascii(img: &DynamicImage) -> String {
     let mut prev_y = 0;
+
+    let mut frame = String::new();
 
     for (_, y, pixel) in img.pixels() {
         let brightness = (pixel[0] as u16 + pixel[1] as u16 + pixel[2] as u16) / 3;
 
         if prev_y != y {
-            print!("\n");
+            frame.push('\n');
         }
-        print!(
+        let ascii_char = format!(
             "\x1b[38;2;{};{};{}m{}\x1b[0m",
             pixel[0],
             pixel[1],
             pixel[2],
             brightness_to_ascii(brightness)
         );
+        frame.push_str(ascii_char.as_str());
 
         prev_y = y;
     }
+    frame
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -69,26 +73,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     frames.sort();
 
     for frame in frames {
+        let start = Instant::now();
         let img = load_image(&frame)?;
         let resized_img = resize_image(img, w, h);
         render_ascii(&resized_img);
-        thread::sleep(Duration::from_millis(33));
-        print!("\x1b[2J");
-        print!("\x1b[H");
+        print!("{:?}", start.elapsed());
+        // thread::sleep(Duration::from_millis(33));
+        // print!("\x1b[2J");
+        // print!("\x1b[H");
     }
 
-    // loop {
-    //     render_ascii(&resized_img);
-    //     thread::sleep(Duration::from_millis(100));
-    //     print!("\x1b[2J");
-    //
-    //     print!("\x1b[H");
-    //
-    //     render_ascii(&_resized_img2);
-    //     thread::sleep(Duration::from_millis(100));
-    //     print!("\x1b[2J");
-    //     print!("\x1b[H");
-    // }
-    //
     Ok(())
 }
