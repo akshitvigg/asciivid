@@ -65,6 +65,9 @@ fn image_to_ascii(img: &DynamicImage) -> String {
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let (w, h) = size()?;
     // let path = get_img_path()?;
+    //
+    // let img = load_image(&path)?;
+    // let resized_img = resize_image(img, w, h);
 
     let mut frames: Vec<PathBuf> = fs::read_dir("/home/akira/marchFrames/")?
         .map(|e| e.unwrap().path())
@@ -72,15 +75,24 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     frames.sort();
 
-    for frame in frames {
-        let start = Instant::now();
-        let img = load_image(&frame)?;
+    let mut ascii_frames: Vec<String> = Vec::new();
+
+    let start = Instant::now();
+    println!("started processing");
+
+    for frame_path in frames {
+        let img = load_image(&frame_path)?;
         let resized_img = resize_image(img, w, h);
-        render_ascii(&resized_img);
-        print!("{:?}", start.elapsed());
-        // thread::sleep(Duration::from_millis(33));
-        // print!("\x1b[2J");
-        // print!("\x1b[H");
+        let frame = image_to_ascii(&resized_img);
+        ascii_frames.push(frame);
+        println!("{}", ascii_frames.len());
+    }
+    println!("{:?}", start.elapsed());
+
+    for frame in &ascii_frames {
+        print!("\x1b[H");
+        print!("{}", frame);
+        thread::sleep(Duration::from_millis(100));
     }
 
     Ok(())
