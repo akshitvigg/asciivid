@@ -1,11 +1,12 @@
 use crossterm::terminal::size;
+use image::imageops::FilterType::Nearest;
 use image::{DynamicImage, GenericImageView, ImageError, imageops::FilterType::Lanczos3};
 use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::thread;
 use std::time::{Duration, Instant};
-use terminal_size::terminal_size;
+// use terminal_size::terminal_size;
 
 fn get_img_path() -> Result<String, String> {
     let args: Vec<String> = env::args().collect();
@@ -24,7 +25,7 @@ fn load_image(path: &Path) -> Result<DynamicImage, ImageError> {
 }
 
 fn resize_image(img: DynamicImage, w: u16, h: u16) -> DynamicImage {
-    image::DynamicImage::resize_exact(&img, w as u32, h as u32, Lanczos3)
+    image::DynamicImage::resize_exact(&img, w as u32, h as u32, Nearest)
 }
 
 const RAMP: &str = " .,:;irsXA253hMHGS#9B&@";
@@ -81,16 +82,29 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("started processing");
 
     for frame_path in frames {
+        let frame_start = Instant::now();
         let img = load_image(&frame_path)?;
+        print!("load={:?} ", frame_start.elapsed());
+
+        let resize_start = Instant::now();
         let resized_img = resize_image(img, w, h);
+        print!(
+            "resize={:?} ,img_dimension = {:?} ",
+            resize_start.elapsed(),
+            resized_img.dimensions()
+        );
+
+        let frame_start = Instant::now();
         let frame = image_to_ascii(&resized_img);
+        print!("img_to_ascii={:?} ", frame_start.elapsed());
+
         ascii_frames.push(frame);
-        println!("{}", ascii_frames.len());
+        println!("frame no.{}", ascii_frames.len());
+        println!("total time taken frame{:?}", start.elapsed());
     }
-    println!("{:?}", start.elapsed());
 
     for frame in &ascii_frames {
-        print!("\x1b[H");
+        // print!("\x1b[H");
         print!("{}", frame);
         thread::sleep(Duration::from_millis(100));
     }
