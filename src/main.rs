@@ -1,12 +1,11 @@
 use crossterm::terminal::size;
 use image::imageops::FilterType::Nearest;
-use image::{DynamicImage, GenericImageView, ImageError, imageops::FilterType::Lanczos3};
+use image::{DynamicImage, GenericImageView, ImageError};
 use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::thread;
 use std::time::{Duration, Instant};
-// use terminal_size::terminal_size;
 
 fn get_img_path() -> Result<String, String> {
     let args: Vec<String> = env::args().collect();
