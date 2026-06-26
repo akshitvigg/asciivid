@@ -1,4 +1,8 @@
 use crossterm::terminal::size;
+use ffmpeg_next::codec::{Context, context};
+use ffmpeg_next::format::{Pixel, input};
+use ffmpeg_next::media::Type;
+use ffmpeg_next::software::scaling::Flags;
 use image::imageops::FilterType::Nearest;
 use image::{DynamicImage, GenericImageView, ImageError};
 use std::env;
@@ -64,48 +68,85 @@ fn image_to_ascii(img: &DynamicImage) -> String {
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let (w, h) = size()?;
-    // let path = get_img_path()?;
+    let pathdemo = get_img_path()?;
     //
     // let img = load_image(&path)?;
     // let resized_img = resize_image(img, w, h);
+    //
+    // let mut frames: Vec<PathBuf> = fs::read_dir("/home/akira/marchFrames/")?
+    //     .map(|e| e.unwrap().path())
+    //     .collect();
+    //
+    // frames.sort();
+    //
+    // let mut ascii_frames: Vec<String> = Vec::new();
+    //
+    // let start = Instant::now();
+    // println!("started processing");
+    //
+    // for frame_path in frames {
+    //     let frame_start = Instant::now();
+    //     let img = load_image(&frame_path)?;
+    //     print!("load={:?} ", frame_start.elapsed());
+    //
+    //     let resize_start = Instant::now();
+    //     let resized_img = resize_image(img, w, h);
+    //     print!(
+    //         "resize={:?} ,img_dimension = {:?} ",
+    //         resize_start.elapsed(),
+    //         resized_img.dimensions()
+    //     );
+    //
+    //     let frame_start = Instant::now();
+    //     let frame = image_to_ascii(&resized_img);
+    //     print!("img_to_ascii={:?} ", frame_start.elapsed());
+    //
+    //     ascii_frames.push(frame);
+    //     println!("frame no.{}", ascii_frames.len());
+    //     println!("total time taken frame{:?}", start.elapsed());
+    // }
+    //
+    // for frame in &ascii_frames {
+    //     // print!("\x1b[H");
+    //     print!("{}", frame);
+    //     thread::sleep(Duration::from_millis(100));
+    // }
+    //
+    //
+    ffmpeg_next::init()?;
 
-    let mut frames: Vec<PathBuf> = fs::read_dir("/home/akira/marchFrames/")?
-        .map(|e| e.unwrap().path())
-        .collect();
+    let path = Path::new(&pathdemo);
+    println!("{:?}", path);
 
-    frames.sort();
+    let mut ictx = input(path)?;
 
-    let mut ascii_frames: Vec<String> = Vec::new();
+    let input_stream = ictx
+        .streams()
+        .best(Type::Video)
+        .ok_or(ffmpeg_next::Error::StreamNotFound)?;
 
-    let start = Instant::now();
-    println!("started processing");
+    let video_stream_index = input_stream.index();
 
-    for frame_path in frames {
-        let frame_start = Instant::now();
-        let img = load_image(&frame_path)?;
-        print!("load={:?} ", frame_start.elapsed());
+    let context_decoder =
+        ffmpeg_next::codec::context::Context::from_parameters(input_stream.parameters())?;
 
-        let resize_start = Instant::now();
-        let resized_img = resize_image(img, w, h);
-        print!(
-            "resize={:?} ,img_dimension = {:?} ",
-            resize_start.elapsed(),
-            resized_img.dimensions()
-        );
+    let mut decoder = context_decoder.decoder().video()?;
+    //
+    // let mut scaler = Context::get(
+    //     decoder.format(),
+    //     decoder.width(),
+    //     decoder.height(),
+    //     Pixel::RGB24,
+    //     decoder.width(),
+    //     decoder.height(),
+    //     Flags::BILINEAR,
+    // )?;
 
-        let frame_start = Instant::now();
-        let frame = image_to_ascii(&resized_img);
-        print!("img_to_ascii={:?} ", frame_start.elapsed());
+    println!("width={}, height={}", decoder.width(), decoder.height());
+    println!("format={:?}", decoder.format());
 
-        ascii_frames.push(frame);
-        println!("frame no.{}", ascii_frames.len());
-        println!("total time taken frame{:?}", start.elapsed());
-    }
-
-    for frame in &ascii_frames {
-        // print!("\x1b[H");
-        print!("{}", frame);
-        thread::sleep(Duration::from_millis(100));
+    for (i, (stream, packet)) in ictx.packets().enumerate() {
+        println!("packet #{} {:?}", i, stream);
     }
 
     Ok(())
