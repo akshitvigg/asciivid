@@ -1,7 +1,9 @@
 use crossterm::terminal::size;
 use ffmpeg_next::codec::{Context, context};
+use ffmpeg_next::decoder;
 use ffmpeg_next::format::{Pixel, input};
-use ffmpeg_next::media::Type;
+use ffmpeg_next::frame::Video;
+use ffmpeg_next::media::Type::{self};
 use ffmpeg_next::software::scaling::Flags;
 use image::imageops::FilterType::Nearest;
 use image::{DynamicImage, GenericImageView, ImageError};
@@ -131,7 +133,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         ffmpeg_next::codec::context::Context::from_parameters(input_stream.parameters())?;
 
     let mut decoder = context_decoder.decoder().video()?;
-    //
+
     // let mut scaler = Context::get(
     //     decoder.format(),
     //     decoder.width(),
@@ -142,11 +144,27 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     //     Flags::BILINEAR,
     // )?;
 
-    println!("width={}, height={}", decoder.width(), decoder.height());
+    // println!("width={}, height={}", decoder.width(), decoder.height());
     println!("format={:?}", decoder.format());
 
-    for (i, (stream, packet)) in ictx.packets().enumerate() {
-        println!("packet #{} {:?}", i, stream);
+    for (stream, packet) in ictx.packets() {
+        if stream.index() == video_stream_index {
+            decoder.send_packet(&packet)?;
+
+            let mut decoded = Video::empty();
+
+            while decoder.receive_frame(&mut decoded).is_ok() {
+                // println!(
+                //     "{} {} {:?} {:?}",
+                //     decoded.width(),
+                //     decoded.height(),
+                //     decoded.format(),
+                //     decoded.pts()
+                // );
+
+                println!("{:?}", &decoded.data(0)[0..20]);
+            }
+        }
     }
 
     Ok(())
