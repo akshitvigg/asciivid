@@ -1,17 +1,14 @@
 use crossterm::terminal::size;
-use ffmpeg_next::codec::{Context, context};
-use ffmpeg_next::decoder;
-use ffmpeg_next::format::{Pixel, input};
+use ffmpeg_next::format::input;
 use ffmpeg_next::frame::Video;
 use ffmpeg_next::media::Type::{self};
-use ffmpeg_next::software::scaling::Flags;
 use image::imageops::FilterType::Nearest;
 use image::{DynamicImage, GenericImageView, ImageError};
 use std::env;
-use std::fs;
-use std::path::{Path, PathBuf};
-use std::thread;
-use std::time::{Duration, Instant};
+// use std::fs;
+use std::path::Path;
+// use std::thread;
+// use std::time::{Duration, Instant};
 
 fn get_img_path() -> Result<String, String> {
     let args: Vec<String> = env::args().collect();
@@ -68,6 +65,16 @@ fn image_to_ascii(img: &DynamicImage) -> String {
     frame
 }
 
+fn brightness_at(frame: &Video, x: usize, y: usize) -> u16 {
+    let y_plane = frame.data(0);
+    let row = y * frame.stride(0);
+    let offset = x * 2;
+    let byte1 = y_plane[row + offset];
+    let byte2 = y_plane[row + offset + 1];
+
+    u16::from_le_bytes([byte1, byte2])
+}
+
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let (w, h) = size()?;
     let pathdemo = get_img_path()?;
@@ -82,7 +89,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // frames.sort();
     //
     // let mut ascii_frames: Vec<String> = Vec::new();
-    //
     // let start = Instant::now();
     // println!("started processing");
     //
@@ -144,9 +150,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     //     Flags::BILINEAR,
     // )?;
 
-    // println!("width={}, height={}", decoder.width(), decoder.height());
-    println!("format={:?}", decoder.format());
-
     for (stream, packet) in ictx.packets() {
         if stream.index() == video_stream_index {
             decoder.send_packet(&packet)?;
@@ -154,15 +157,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             let mut decoded = Video::empty();
 
             while decoder.receive_frame(&mut decoded).is_ok() {
-                // println!(
-                //     "{} {} {:?} {:?}",
-                //     decoded.width(),
-                //     decoded.height(),
-                //     decoded.format(),
-                //     decoded.pts()
-                // );
-
-                println!("{:?}", &decoded.data(0)[0..20]);
+                println!("{}", brightness_at(&decoded, 50, 1));
             }
         }
     }
