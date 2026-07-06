@@ -1,14 +1,16 @@
 use crossterm::terminal::size;
+use ffmpeg_next::format::Pixel::{RGB24, YUV420P10, YUV420P10LE};
 use ffmpeg_next::format::input;
 use ffmpeg_next::frame::Video;
 use ffmpeg_next::media::Type::{self};
+use ffmpeg_next::software::scaling::{Context, Flags};
 use image::imageops::FilterType::Nearest;
 use image::{DynamicImage, GenericImageView, ImageError};
 use std::env;
 // use std::fs;
 use std::path::Path;
-// use std::thread;
-// use std::time::{Duration, Instant};
+use std::thread;
+use std::time::Duration;
 
 fn get_img_path() -> Result<String, String> {
     let args: Vec<String> = env::args().collect();
@@ -65,7 +67,7 @@ fn image_to_ascii(img: &DynamicImage) -> String {
     frame
 }
 
-fn brightness_at(frame: &Video, x: usize, y: usize) -> u16 {
+fn luma_at(frame: &Video, x: usize, y: usize) -> u16 {
     let y_plane = frame.data(0);
     let row = y * frame.stride(0);
     let offset = x * 2;
@@ -76,7 +78,7 @@ fn brightness_at(frame: &Video, x: usize, y: usize) -> u16 {
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let (w, h) = size()?;
+    let (_w, _h) = size()?;
     let pathdemo = get_img_path()?;
     //
     // let img = load_image(&path)?;
@@ -140,15 +142,17 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let mut decoder = context_decoder.decoder().video()?;
 
-    // let mut scaler = Context::get(
-    //     decoder.format(),
-    //     decoder.width(),
-    //     decoder.height(),
-    //     Pixel::RGB24,
-    //     decoder.width(),
-    //     decoder.height(),
-    //     Flags::BILINEAR,
-    // )?;
+    let mut scaler = Context::get(
+        decoder.format(),
+        decoder.width(),
+        decoder.height(),
+        YUV420P10LE,
+        _w as u32,
+        _h as u32,
+        Flags::BILINEAR,
+    )?;
+
+    let mut scaled = Video::empty();
 
     for (stream, packet) in ictx.packets() {
         if stream.index() == video_stream_index {
@@ -157,7 +161,23 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             let mut decoded = Video::empty();
 
             while decoder.receive_frame(&mut decoded).is_ok() {
-                println!("{}", brightness_at(&decoded, 50, 1));
+                scaler.run(&decoded, &mut scaled)?;
+
+                let mut ascii_frame = String::new();
+
+                for y in 0..scaled.height() {
+                    for x in 0..scaled.width() {
+                        let brightness = luma_at(&scaled, x as usize, y as usize);
+
+                        let scaled_brightness = brightness / 4;
+
+                        ascii_frame.push(brightness_to_ascii(scaled_brightness))
+                    }
+                    ascii_frame.push('\n');
+                }
+                print!("{}", ascii_frame);
+                print!("\x1b[H");
+                // thread::sleep(Duration::from_millis(33));
             }
         }
     }
