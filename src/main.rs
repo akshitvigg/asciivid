@@ -1,5 +1,5 @@
 use crossterm::terminal::size;
-use ffmpeg_next::format::Pixel::{RGB24, YUV420P10, YUV420P10LE};
+use ffmpeg_next::format::Pixel::RGB24;
 use ffmpeg_next::format::input;
 use ffmpeg_next::frame::Video;
 use ffmpeg_next::media::Type::{self};
@@ -7,10 +7,7 @@ use ffmpeg_next::software::scaling::{Context, Flags};
 use image::imageops::FilterType::Nearest;
 use image::{DynamicImage, GenericImageView, ImageError};
 use std::env;
-// use std::fs;
 use std::path::Path;
-use std::thread;
-use std::time::Duration;
 
 fn get_img_path() -> Result<String, String> {
     let args: Vec<String> = env::args().collect();
@@ -67,14 +64,14 @@ fn image_to_ascii(img: &DynamicImage) -> String {
     frame
 }
 
-fn luma_at(frame: &Video, x: usize, y: usize) -> u16 {
-    let y_plane = frame.data(0);
+fn rgb_at(frame: &Video, x: usize, y: usize) -> (u8, u8, u8) {
+    let rgb_plane = frame.data(0);
     let row = y * frame.stride(0);
-    let offset = x * 2;
-    let byte1 = y_plane[row + offset];
-    let byte2 = y_plane[row + offset + 1];
-
-    u16::from_le_bytes([byte1, byte2])
+    let offset = x * 3;
+    let byte1 = rgb_plane[row + offset];
+    let byte2 = rgb_plane[row + offset + 1];
+    let byte3 = rgb_plane[row + offset + 2];
+    (byte1, byte2, byte3)
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -122,7 +119,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     //     thread::sleep(Duration::from_millis(100));
     // }
     //
-    //
     ffmpeg_next::init()?;
 
     let path = Path::new(&pathdemo);
@@ -146,7 +142,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         decoder.format(),
         decoder.width(),
         decoder.height(),
-        YUV420P10LE,
+        RGB24,
         _w as u32,
         _h as u32,
         Flags::BILINEAR,
@@ -167,16 +163,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
                 for y in 0..scaled.height() {
                     for x in 0..scaled.width() {
-                        let brightness = luma_at(&scaled, x as usize, y as usize);
+                        println!("{:?}", rgb_at(&scaled, x as usize, y as usize));
 
-                        let scaled_brightness = brightness / 4;
-
-                        ascii_frame.push(brightness_to_ascii(scaled_brightness))
+                        // ascii_frame.push(brightness_to_ascii(scaled_brightness));
                     }
-                    ascii_frame.push('\n');
+                    // ascii_frame.push('\n');
                 }
-                print!("{}", ascii_frame);
-                print!("\x1b[H");
+
+                // print!("{}", ascii_frame);
+                // print!("\x1b[H");
                 // thread::sleep(Duration::from_millis(33));
             }
         }
