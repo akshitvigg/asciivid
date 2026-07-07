@@ -7,7 +7,9 @@ use ffmpeg_next::software::scaling::{Context, Flags};
 use image::imageops::FilterType::Nearest;
 use image::{DynamicImage, GenericImageView, ImageError};
 use std::env;
+use std::fmt::Write;
 use std::path::Path;
+use std::time::Instant;
 
 fn get_img_path() -> Result<String, String> {
     let args: Vec<String> = env::args().collect();
@@ -64,14 +66,18 @@ fn image_to_ascii(img: &DynamicImage) -> String {
     frame
 }
 
+fn brightness(r: u8, g: u8, b: u8) -> u16 {
+    (r as u16 + g as u16 + b as u16) / 3
+}
+
 fn rgb_at(frame: &Video, x: usize, y: usize) -> (u8, u8, u8) {
     let rgb_plane = frame.data(0);
     let row = y * frame.stride(0);
     let offset = x * 3;
-    let byte1 = rgb_plane[row + offset];
-    let byte2 = rgb_plane[row + offset + 1];
-    let byte3 = rgb_plane[row + offset + 2];
-    (byte1, byte2, byte3)
+    let r = rgb_plane[row + offset].to_owned();
+    let g = rgb_plane[row + offset + 1].to_owned();
+    let b = rgb_plane[row + offset + 2].to_owned();
+    (r, g, b)
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -152,26 +158,44 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     for (stream, packet) in ictx.packets() {
         if stream.index() == video_stream_index {
+            // let decode_time = Instant::now();
             decoder.send_packet(&packet)?;
 
             let mut decoded = Video::empty();
 
             while decoder.receive_frame(&mut decoded).is_ok() {
+                // println!("decode={:?}", decode_time.elapsed());
+
+                // let scale_time = Instant::now();
                 scaler.run(&decoded, &mut scaled)?;
+                // println!("scale={:?}", scale_time.elapsed());
 
                 let mut ascii_frame = String::new();
 
+                // let ascii = Instant::now();
+
                 for y in 0..scaled.height() {
                     for x in 0..scaled.width() {
-                        println!("{:?}", rgb_at(&scaled, x as usize, y as usize));
+                        let (r, g, b) = rgb_at(&scaled, x as usize, y as usize);
+                        let brightness = brightness(r, g, b);
 
-                        // ascii_frame.push(brightness_to_ascii(scaled_brightness));
+                        let ascii_char = brightness_to_ascii(brightness);
+                        // ascii_frame.push(brightness_to_ascii(brightness));
+                        write!(
+                            ascii_frame,
+                            "\x1b[38;2;{};{};{}m{}\x1b[0m",
+                            r, g, b, ascii_char
+                        )
+                        .unwrap();
                     }
-                    // ascii_frame.push('\n');
+                    ascii_frame.push('\n');
                 }
+                // println!("ascii={:?}", ascii.elapsed());
 
-                // print!("{}", ascii_frame);
-                // print!("\x1b[H");
+                // let render_time = Instant::now();
+                print!("\x1b[H");
+                print!("{}", ascii_frame);
+                // println!("render={:?}", render_time.elapsed());
                 // thread::sleep(Duration::from_millis(33));
             }
         }
