@@ -1,15 +1,16 @@
 use crossterm::terminal::size;
+use ffmpeg_next::Rational;
 use ffmpeg_next::format::Pixel::RGB24;
 use ffmpeg_next::format::input;
 use ffmpeg_next::frame::Video;
 use ffmpeg_next::media::Type::{self};
 use ffmpeg_next::software::scaling::{Context, Flags};
-use image::imageops::FilterType::Nearest;
-use image::{DynamicImage, GenericImageView, ImageError};
 use std::env;
 use std::fmt::Write;
+use std::io::{Write as IOWrite, stdout};
 use std::path::Path;
-use std::time::Instant;
+use std::thread;
+use std::time::{Duration, Instant};
 
 fn get_img_path() -> Result<String, String> {
     let args: Vec<String> = env::args().collect();
@@ -23,14 +24,6 @@ fn get_img_path() -> Result<String, String> {
     Ok(image_name.to_string())
 }
 
-fn load_image(path: &Path) -> Result<DynamicImage, ImageError> {
-    image::ImageReader::open(path)?.decode()
-}
-
-fn resize_image(img: DynamicImage, w: u16, h: u16) -> DynamicImage {
-    image::DynamicImage::resize_exact(&img, w as u32, h as u32, Nearest)
-}
-
 const RAMP: &str = " .,:;irsXA253hMHGS#9B&@";
 const MAGIC_NUM: f64 = (RAMP.len() - 1) as f64 / 255.0;
 
@@ -39,31 +32,6 @@ fn brightness_to_ascii(brightness: u16) -> char {
     let ramp_abs = ramp_ind.round();
     let ascii_char = RAMP.as_bytes()[ramp_abs as usize] as char;
     ascii_char
-}
-
-fn image_to_ascii(img: &DynamicImage) -> String {
-    let mut prev_y = 0;
-
-    let mut frame = String::new();
-
-    for (_, y, pixel) in img.pixels() {
-        let brightness = (pixel[0] as u16 + pixel[1] as u16 + pixel[2] as u16) / 3;
-
-        if prev_y != y {
-            frame.push('\n');
-        }
-        let ascii_char = format!(
-            "\x1b[38;2;{};{};{}m{}\x1b[0m",
-            pixel[0],
-            pixel[1],
-            pixel[2],
-            brightness_to_ascii(brightness)
-        );
-        frame.push_str(ascii_char.as_str());
-
-        prev_y = y;
-    }
-    frame
 }
 
 fn brightness(r: u8, g: u8, b: u8) -> u16 {
@@ -78,6 +46,59 @@ fn rgb_at(frame: &Video, x: usize, y: usize) -> (u8, u8, u8) {
     let g = rgb_plane[row + offset + 1].to_owned();
     let b = rgb_plane[row + offset + 2].to_owned();
     (r, g, b)
+}
+
+fn process_frame(
+    decoded: &Video,
+    scaler: &mut Context,
+    scaled: &mut Video,
+    time_base: Rational,
+    playback_start: Instant,
+) {
+    scaler.run(decoded, scaled).unwrap();
+
+    let mut ascii_frame = String::new();
+
+    // Move cursor to top-left (0,0) before rewriting frame
+    // to avoid scrolling lag and screen tearing
+    write!(ascii_frame, "\x1b[H").unwrap();
+
+    for y in 0..scaled.height() {
+        for x in 0..scaled.width() {
+            let (r, g, b) = rgb_at(&scaled, x as usize, y as usize);
+            let brightness = brightness(r, g, b);
+
+            let ascii_char = brightness_to_ascii(brightness);
+            write!(
+                ascii_frame,
+                "\x1b[38;2;{};{};{}m{}\x1b[0m",
+                r, g, b, ascii_char
+            )
+            .unwrap();
+        }
+        ascii_frame.push('\n');
+    }
+    let pts_opts = decoded.pts();
+
+    if let Some(pts) = pts_opts {
+        let frame_secs = (pts as f64 * f64::from(time_base.0)) / f64::from(time_base.1);
+
+        let real_elapsed_secs = playback_start.elapsed().as_secs_f64();
+
+        if frame_secs > real_elapsed_secs {
+            let drift = frame_secs - real_elapsed_secs;
+            thread::sleep(Duration::from_secs_f64(drift));
+        } else {
+            let lag = real_elapsed_secs - frame_secs;
+
+            // if lag > 0.1 {
+            //     continue;
+            // }
+        }
+    }
+    println!("{}", ascii_frame.len());
+    print!("{}", ascii_frame);
+    stdout().flush().unwrap();
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -156,50 +177,41 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let mut scaled = Video::empty();
 
+    let time_base = input_stream.time_base();
+
+    //clear screen once b4 playing
+    print!("\x1b[2J");
+    print!("\x1b[?25l");
+
+    let mut playback_start = None;
+
     for (stream, packet) in ictx.packets() {
         if stream.index() == video_stream_index {
-            // let decode_time = Instant::now();
             decoder.send_packet(&packet)?;
 
             let mut decoded = Video::empty();
 
             while decoder.receive_frame(&mut decoded).is_ok() {
-                // println!("decode={:?}", decode_time.elapsed());
-
-                // let scale_time = Instant::now();
-                scaler.run(&decoded, &mut scaled)?;
-                // println!("scale={:?}", scale_time.elapsed());
-
-                let mut ascii_frame = String::new();
-
-                // let ascii = Instant::now();
-
-                for y in 0..scaled.height() {
-                    for x in 0..scaled.width() {
-                        let (r, g, b) = rgb_at(&scaled, x as usize, y as usize);
-                        let brightness = brightness(r, g, b);
-
-                        let ascii_char = brightness_to_ascii(brightness);
-                        // ascii_frame.push(brightness_to_ascii(brightness));
-                        write!(
-                            ascii_frame,
-                            "\x1b[38;2;{};{};{}m{}\x1b[0m",
-                            r, g, b, ascii_char
-                        )
-                        .unwrap();
-                    }
-                    ascii_frame.push('\n');
+                if playback_start.is_none() {
+                    playback_start = Some(Instant::now());
                 }
-                // println!("ascii={:?}", ascii.elapsed());
 
-                // let render_time = Instant::now();
-                print!("\x1b[H");
-                print!("{}", ascii_frame);
-                // println!("render={:?}", render_time.elapsed());
-                // thread::sleep(Duration::from_millis(33));
+                let playback_start = playback_start.unwrap();
+
+                process_frame(
+                    &decoded,
+                    &mut scaler,
+                    &mut scaled,
+                    time_base,
+                    playback_start,
+                );
             }
         }
     }
+
+    decoder.send_eof()?;
+
+    print!("\x1b[?25h");
 
     Ok(())
 }
