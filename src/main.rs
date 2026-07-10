@@ -1,10 +1,10 @@
 use crossterm::terminal::size;
-use ffmpeg_next::Rational;
 use ffmpeg_next::format::Pixel::RGB24;
 use ffmpeg_next::format::input;
 use ffmpeg_next::frame::Video;
 use ffmpeg_next::media::Type::{self};
 use ffmpeg_next::software::scaling::{Context, Flags};
+use ffmpeg_next::{Error, Rational};
 use std::env;
 use std::fmt::Write;
 use std::io::{Write as IOWrite, stdout};
@@ -54,8 +54,8 @@ fn process_frame(
     scaled: &mut Video,
     time_base: Rational,
     playback_start: Instant,
-) {
-    scaler.run(decoded, scaled).unwrap();
+) -> Result<(), Error> {
+    scaler.run(decoded, scaled)?;
 
     let mut ascii_frame = String::new();
 
@@ -96,9 +96,9 @@ fn process_frame(
             // }
         }
     }
-    println!("{}", ascii_frame.len());
     print!("{}", ascii_frame);
     stdout().flush().unwrap();
+    Ok(())
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -185,11 +185,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let mut playback_start = None;
 
+    let mut decoded = Video::empty();
+
     for (stream, packet) in ictx.packets() {
         if stream.index() == video_stream_index {
             decoder.send_packet(&packet)?;
-
-            let mut decoded = Video::empty();
 
             while decoder.receive_frame(&mut decoded).is_ok() {
                 if playback_start.is_none() {
@@ -204,13 +204,27 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     &mut scaled,
                     time_base,
                     playback_start,
-                );
+                )?;
             }
         }
     }
 
     decoder.send_eof()?;
+    while decoder.receive_frame(&mut decoded).is_ok() {
+        if playback_start.is_none() {
+            playback_start = Some(Instant::now());
+        }
 
+        let playback_start = playback_start.unwrap();
+
+        process_frame(
+            &decoded,
+            &mut scaler,
+            &mut scaled,
+            time_base,
+            playback_start,
+        )?;
+    }
     print!("\x1b[?25h");
 
     Ok(())
