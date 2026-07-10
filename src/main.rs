@@ -1,4 +1,6 @@
-use crossterm::terminal::size;
+use crossterm::cursor::{Hide, Show};
+use crossterm::execute;
+use crossterm::terminal::{Clear, ClearType, EnterAlternateScreen, LeaveAlternateScreen, size};
 use ffmpeg_next::format::Pixel::RGB24;
 use ffmpeg_next::format::input;
 use ffmpeg_next::frame::Video;
@@ -101,7 +103,20 @@ fn process_frame(
     Ok(())
 }
 
+struct TerminalGuard;
+
+impl TerminalGuard {
+    pub fn new() -> std::io::Result<Self> {
+        //clear screen once b4 playing
+        let mut out = stdout();
+        execute!(out, EnterAlternateScreen, Clear(ClearType::All), Hide)?;
+        out.flush()?;
+        Ok(Self)
+    }
+}
+
 fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let _guard = TerminalGuard::new()?;
     let (_w, _h) = size()?;
     let pathdemo = get_img_path()?;
     //
@@ -179,10 +194,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let time_base = input_stream.time_base();
 
-    //clear screen once b4 playing
-    print!("\x1b[2J");
-    print!("\x1b[?25l");
-
     let mut playback_start = None;
 
     let mut decoded = Video::empty();
@@ -225,7 +236,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             playback_start,
         )?;
     }
-    print!("\x1b[?25h");
 
     Ok(())
+}
+
+impl Drop for TerminalGuard {
+    fn drop(&mut self) {
+        let mut out = stdout();
+        let _ = execute!(stdout(), LeaveAlternateScreen, Show);
+        let _ = out.flush();
+    }
 }
