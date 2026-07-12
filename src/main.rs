@@ -1,6 +1,12 @@
 use crossterm::cursor::{Hide, Show};
+use crossterm::event::Event::{self};
+use crossterm::event::{KeyCode, poll, read};
 use crossterm::execute;
-use crossterm::terminal::{Clear, ClearType, EnterAlternateScreen, LeaveAlternateScreen, size};
+use crossterm::terminal::{
+    Clear, ClearType, EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode,
+    enable_raw_mode, size,
+};
+use ffmpeg_next::decoder::Video as VideoDecoder;
 use ffmpeg_next::format::Pixel::RGB24;
 use ffmpeg_next::format::input;
 use ffmpeg_next::frame::Video;
@@ -91,7 +97,7 @@ fn process_frame(
             let drift = frame_secs - real_elapsed_secs;
             thread::sleep(Duration::from_secs_f64(drift));
         } else {
-            let lag = real_elapsed_secs - frame_secs;
+            // let lag = real_elapsed_secs - frame_secs;
 
             // if lag > 0.1 {
             //     continue;
@@ -103,11 +109,45 @@ fn process_frame(
     Ok(())
 }
 
+fn drain_decoder(
+    decoded: &mut Video,
+    decoder: &mut VideoDecoder,
+    playback_start: &mut Option<Instant>,
+    scaler: &mut Context,
+    scaled: &mut Video,
+    time_base: Rational,
+    should_quit: &mut bool,
+) -> Result<(), Box<dyn std::error::Error>> {
+    while decoder.receive_frame(decoded).is_ok() {
+        if playback_start.is_none() {
+            *playback_start = Some(Instant::now());
+        }
+
+        let playback_start = playback_start.unwrap();
+
+        process_frame(decoded, scaler, scaled, time_base, playback_start)?;
+
+        if poll(Duration::ZERO)? {
+            if let Event::Key(key) = read()? {
+                if key.code == KeyCode::Char('q') {
+                    *should_quit = true;
+                }
+            }
+        }
+
+        if *should_quit {
+            return Ok(());
+        }
+    }
+    Ok(())
+}
+
 struct TerminalGuard;
 
 impl TerminalGuard {
     pub fn new() -> std::io::Result<Self> {
         //clear screen once b4 playing
+        enable_raw_mode()?;
         let mut out = stdout();
         execute!(out, EnterAlternateScreen, Clear(ClearType::All), Hide)?;
         out.flush()?;
@@ -119,48 +159,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let _guard = TerminalGuard::new()?;
     let (_w, _h) = size()?;
     let pathdemo = get_img_path()?;
-    //
-    // let img = load_image(&path)?;
-    // let resized_img = resize_image(img, w, h);
-    //
-    // let mut frames: Vec<PathBuf> = fs::read_dir("/home/akira/marchFrames/")?
-    //     .map(|e| e.unwrap().path())
-    //     .collect();
-    //
-    // frames.sort();
-    //
-    // let mut ascii_frames: Vec<String> = Vec::new();
-    // let start = Instant::now();
-    // println!("started processing");
-    //
-    // for frame_path in frames {
-    //     let frame_start = Instant::now();
-    //     let img = load_image(&frame_path)?;
-    //     print!("load={:?} ", frame_start.elapsed());
-    //
-    //     let resize_start = Instant::now();
-    //     let resized_img = resize_image(img, w, h);
-    //     print!(
-    //         "resize={:?} ,img_dimension = {:?} ",
-    //         resize_start.elapsed(),
-    //         resized_img.dimensions()
-    //     );
-    //
-    //     let frame_start = Instant::now();
-    //     let frame = image_to_ascii(&resized_img);
-    //     print!("img_to_ascii={:?} ", frame_start.elapsed());
-    //
-    //     ascii_frames.push(frame);
-    //     println!("frame no.{}", ascii_frames.len());
-    //     println!("total time taken frame{:?}", start.elapsed());
-    // }
-    //
-    // for frame in &ascii_frames {
-    //     // print!("\x1b[H");
-    //     print!("{}", frame);
-    //     thread::sleep(Duration::from_millis(100));
-    // }
-    //
+
     ffmpeg_next::init()?;
 
     let path = Path::new(&pathdemo);
@@ -198,42 +197,39 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let mut decoded = Video::empty();
 
+    let mut should_quit = false;
+
     for (stream, packet) in ictx.packets() {
         if stream.index() == video_stream_index {
             decoder.send_packet(&packet)?;
 
-            while decoder.receive_frame(&mut decoded).is_ok() {
-                if playback_start.is_none() {
-                    playback_start = Some(Instant::now());
-                }
+            drain_decoder(
+                &mut decoded,
+                &mut decoder,
+                &mut playback_start,
+                &mut scaler,
+                &mut scaled,
+                time_base,
+                &mut should_quit,
+            )?;
 
-                let playback_start = playback_start.unwrap();
-
-                process_frame(
-                    &decoded,
-                    &mut scaler,
-                    &mut scaled,
-                    time_base,
-                    playback_start,
-                )?;
+            if should_quit {
+                break;
             }
         }
     }
 
-    decoder.send_eof()?;
-    while decoder.receive_frame(&mut decoded).is_ok() {
-        if playback_start.is_none() {
-            playback_start = Some(Instant::now());
-        }
+    if !should_quit {
+        decoder.send_eof()?;
 
-        let playback_start = playback_start.unwrap();
-
-        process_frame(
-            &decoded,
+        drain_decoder(
+            &mut decoded,
+            &mut decoder,
+            &mut playback_start,
             &mut scaler,
             &mut scaled,
             time_base,
-            playback_start,
+            &mut should_quit,
         )?;
     }
 
@@ -242,8 +238,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 impl Drop for TerminalGuard {
     fn drop(&mut self) {
+        disable_raw_mode().unwrap();
         let mut out = stdout();
-        let _ = execute!(stdout(), LeaveAlternateScreen, Show);
+        let _ = execute!(out, LeaveAlternateScreen, Show);
         let _ = out.flush();
     }
 }
