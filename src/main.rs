@@ -84,7 +84,7 @@ fn process_frame(
             )
             .unwrap();
         }
-        ascii_frame.push('\n');
+        ascii_frame.push_str("\r\n");
     }
     let pts_opts = decoded.pts();
 
@@ -163,7 +163,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     ffmpeg_next::init()?;
 
     let path = Path::new(&pathdemo);
-    println!("{:?}", path);
 
     let mut ictx = input(path)?;
 
