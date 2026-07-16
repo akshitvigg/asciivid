@@ -62,7 +62,7 @@ fn process_frame(
     scaled: &mut Video,
     time_base: Rational,
     playback_start: Instant,
-    total_paused: &mut Duration,
+    total_paused: Duration,
 ) -> Result<(), Error> {
     scaler.run(decoded, scaled)?;
 
@@ -92,7 +92,7 @@ fn process_frame(
     if let Some(pts) = pts_opts {
         let frame_secs = (pts as f64 * f64::from(time_base.0)) / f64::from(time_base.1);
 
-        let real_elapsed_secs = (Instant::now() - playback_start - *total_paused).as_secs_f64();
+        let real_elapsed_secs = (Instant::now() - playback_start - total_paused).as_secs_f64();
 
         if frame_secs > real_elapsed_secs {
             let drift = frame_secs - real_elapsed_secs;
@@ -113,45 +113,43 @@ fn process_frame(
 fn drain_decoder(
     decoded: &mut Video,
     decoder: &mut VideoDecoder,
-    playback_start: &mut Option<Instant>,
     scaler: &mut Context,
     scaled: &mut Video,
     time_base: Rational,
-    should_quit: &mut bool,
-    is_paused: &mut bool,
-    total_paused: &mut Duration,
-    pause_started: &mut Option<Instant>,
+    state: &mut PlaybackState,
 ) -> Result<(), Box<dyn std::error::Error>> {
     while decoder.receive_frame(decoded).is_ok() {
-        if playback_start.is_none() {
-            *playback_start = Some(Instant::now());
+        if state.playback_start.is_none() {
+            state.playback_start = Some(Instant::now());
         }
 
-        let playback_start = playback_start.unwrap();
+        let playback_start = state.playback_start.unwrap();
 
         if poll(Duration::ZERO)? {
             if let Event::Key(key) = read()? {
                 if key.code == KeyCode::Char(' ') {
-                    *pause_started = Some(Instant::now());
-                    *is_paused = true;
+                    if !state.is_paused {
+                        state.pause_started = Some(Instant::now());
+                        state.is_paused = true;
+                    }
                 }
                 if key.code == KeyCode::Char('q') {
-                    *should_quit = true;
+                    state.should_quit = true;
                 }
             }
         }
 
-        while *is_paused {
+        while state.is_paused {
             if let Event::Key(key) = read()? {
                 if key.code == KeyCode::Char(' ') {
-                    let duration = Instant::now() - pause_started.unwrap();
-                    *total_paused += duration;
-                    *pause_started = None;
-                    *is_paused = false;
+                    let duration = Instant::now() - state.pause_started.unwrap();
+                    state.total_paused += duration;
+                    state.pause_started = None;
+                    state.is_paused = false;
                 }
 
                 if key.code == KeyCode::Char('q') {
-                    *should_quit = true;
+                    state.should_quit = true;
                     return Ok(());
                 }
             }
@@ -163,10 +161,10 @@ fn drain_decoder(
             scaled,
             time_base,
             playback_start,
-            total_paused,
+            state.total_paused,
         )?;
 
-        if *should_quit {
+        if state.should_quit {
             return Ok(());
         }
     }
@@ -184,6 +182,14 @@ impl TerminalGuard {
         out.flush()?;
         Ok(Self)
     }
+}
+
+struct PlaybackState {
+    playback_start: Option<Instant>,
+    total_paused: Duration,
+    pause_started: Option<Instant>,
+    is_paused: bool,
+    should_quit: bool,
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -223,15 +229,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let time_base = input_stream.time_base();
 
-    let mut playback_start = None;
-
     let mut decoded = Video::empty();
 
-    let mut should_quit = false;
-    let mut is_paused = false;
-
-    let mut total_paused = Duration::ZERO;
-    let mut pause_started: Option<Instant> = None;
+    let mut state = PlaybackState {
+        playback_start: None,
+        total_paused: Duration::ZERO,
+        pause_started: None,
+        is_paused: false,
+        should_quit: false,
+    };
 
     for (stream, packet) in ictx.packets() {
         if stream.index() == video_stream_index {
@@ -240,36 +246,28 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             drain_decoder(
                 &mut decoded,
                 &mut decoder,
-                &mut playback_start,
                 &mut scaler,
                 &mut scaled,
                 time_base,
-                &mut should_quit,
-                &mut is_paused,
-                &mut total_paused,
-                &mut pause_started,
+                &mut state,
             )?;
 
-            if should_quit {
+            if state.should_quit {
                 break;
             }
         }
     }
 
-    if !should_quit {
+    if !state.should_quit {
         decoder.send_eof()?;
 
         drain_decoder(
             &mut decoded,
             &mut decoder,
-            &mut playback_start,
             &mut scaler,
             &mut scaled,
             time_base,
-            &mut should_quit,
-            &mut is_paused,
-            &mut total_paused,
-            &mut pause_started,
+            &mut state,
         )?;
     }
 
