@@ -60,9 +60,9 @@ fn process_frame(
     decoded: &Video,
     scaler: &mut Context,
     scaled: &mut Video,
-    time_base: Rational,
     playback_start: Instant,
     total_paused: Duration,
+    frame_secs: f64,
 ) -> Result<(), Error> {
     scaler.run(decoded, scaled)?;
 
@@ -87,27 +87,29 @@ fn process_frame(
         }
         ascii_frame.push_str("\r\n");
     }
-    let pts_opts = decoded.pts();
 
-    if let Some(pts) = pts_opts {
-        let frame_secs = (pts as f64 * f64::from(time_base.0)) / f64::from(time_base.1);
+    let real_elapsed_secs = (Instant::now() - playback_start - total_paused).as_secs_f64();
 
-        let real_elapsed_secs = (Instant::now() - playback_start - total_paused).as_secs_f64();
+    if frame_secs > real_elapsed_secs {
+        let drift = frame_secs - real_elapsed_secs;
+        thread::sleep(Duration::from_secs_f64(drift));
+    } else {
+        // let lag = real_elapsed_secs - frame_secs;
 
-        if frame_secs > real_elapsed_secs {
-            let drift = frame_secs - real_elapsed_secs;
-            thread::sleep(Duration::from_secs_f64(drift));
-        } else {
-            // let lag = real_elapsed_secs - frame_secs;
-
-            // if lag > 0.1 {
-            //     continue;
-            // }
-        }
+        // if lag > 0.1 {
+        //     continue;
+        // }
     }
     print!("{}", ascii_frame);
     stdout().flush().unwrap();
     Ok(())
+}
+
+fn secs_to_timestamp() {}
+
+fn pts_to_secs(pts: i64, time_base: Rational) -> f64 {
+    let secs = (pts as f64 * f64::from(time_base.0)) / f64::from(time_base.1);
+    secs
 }
 
 fn drain_decoder(
@@ -124,6 +126,11 @@ fn drain_decoder(
         }
 
         let playback_start = state.playback_start.unwrap();
+
+        if let Some(pts) = decoded.pts() {
+            state.current_pts = decoded.pts();
+            state.current_time = pts_to_secs(pts, time_base);
+        }
 
         if poll(Duration::ZERO)? {
             if let Event::Key(key) = read()? {
@@ -159,9 +166,9 @@ fn drain_decoder(
             decoded,
             scaler,
             scaled,
-            time_base,
             playback_start,
             state.total_paused,
+            state.current_time,
         )?;
 
         if state.should_quit {
@@ -190,6 +197,8 @@ struct PlaybackState {
     pause_started: Option<Instant>,
     is_paused: bool,
     should_quit: bool,
+    current_pts: Option<i64>,
+    current_time: f64,
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -237,6 +246,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         pause_started: None,
         is_paused: false,
         should_quit: false,
+        current_pts: None,
+        current_time: 0.0,
     };
 
     for (stream, packet) in ictx.packets() {
