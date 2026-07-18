@@ -100,12 +100,15 @@ fn process_frame(
         //     continue;
         // }
     }
-    print!("{}", ascii_frame);
+    // print!("{}", ascii_frame);
     stdout().flush().unwrap();
     Ok(())
 }
 
-fn secs_to_timestamp() {}
+fn secs_to_timestamp(secs: f64, time_base: Rational) -> i64 {
+    let tb = time_base.0 as f64 / time_base.1 as f64;
+    (secs / tb).round() as i64
+}
 
 fn pts_to_secs(pts: i64, time_base: Rational) -> f64 {
     let secs = (pts as f64 * f64::from(time_base.0)) / f64::from(time_base.1);
@@ -128,7 +131,7 @@ fn drain_decoder(
         let playback_start = state.playback_start.unwrap();
 
         if let Some(pts) = decoded.pts() {
-            state.current_pts = decoded.pts();
+            state.current_pts = pts;
             state.current_time = pts_to_secs(pts, time_base);
         }
 
@@ -143,8 +146,33 @@ fn drain_decoder(
                 if key.code == KeyCode::Char('q') {
                     state.should_quit = true;
                 }
+
+                if key.code == KeyCode::Left {
+                    state.seek_requested = true;
+                    if state.current_time - 5.0 <= 0.0 {
+                        state.seek_target_secs = 0.0;
+                    } else {
+                        state.seek_target_secs = state.current_time - 5.0;
+                    }
+                }
+
+                if key.code == KeyCode::Right {
+                    state.seek_requested = true;
+                    state.seek_target_secs = state.current_time + 5.0;
+                }
             }
         }
+        println!(
+            "Current: {:.2}s ({})",
+            state.current_time, state.current_pts
+        );
+        println!("{}", state.seek_requested);
+
+        println!(
+            "Target : {:.2}s ({})",
+            state.seek_target_secs,
+            secs_to_timestamp(state.seek_target_secs, time_base)
+        );
 
         while state.is_paused {
             if let Event::Key(key) = read()? {
@@ -159,6 +187,19 @@ fn drain_decoder(
                     state.should_quit = true;
                     return Ok(());
                 }
+                if key.code == KeyCode::Left {
+                    state.seek_requested = true;
+                    if state.current_time - 5.0 <= 0.0 {
+                        state.seek_target_secs = 0.0;
+                    } else {
+                        state.seek_target_secs = state.current_time - 5.0;
+                    }
+                }
+
+                if key.code == KeyCode::Right {
+                    state.seek_requested = true;
+                    state.seek_target_secs = state.current_time + 5.0;
+                }
             }
         }
 
@@ -170,6 +211,10 @@ fn drain_decoder(
             state.total_paused,
             state.current_time,
         )?;
+
+        if state.seek_requested {
+            return Ok(());
+        }
 
         if state.should_quit {
             return Ok(());
@@ -197,8 +242,10 @@ struct PlaybackState {
     pause_started: Option<Instant>,
     is_paused: bool,
     should_quit: bool,
-    current_pts: Option<i64>,
+    current_pts: i64,
     current_time: f64,
+    seek_requested: bool,
+    seek_target_secs: f64,
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -246,8 +293,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         pause_started: None,
         is_paused: false,
         should_quit: false,
-        current_pts: None,
+        current_pts: 0,
         current_time: 0.0,
+        seek_requested: false,
+        seek_target_secs: 0.0,
     };
 
     for (stream, packet) in ictx.packets() {
@@ -262,6 +311,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 time_base,
                 &mut state,
             )?;
+
+            if state.seek_requested {
+                break;
+            }
 
             if state.should_quit {
                 break;
