@@ -162,18 +162,18 @@ fn drain_decoder(
                 }
             }
         }
-        println!(
-            "Current: {:.2}s ({})",
-            state.current_time, state.current_pts
-        );
-        println!("{}", state.seek_requested);
 
-        println!(
-            "Target : {:.2}s ({})",
-            state.seek_target_secs,
-            secs_to_timestamp(state.seek_target_secs, time_base)
-        );
-
+        // println!(
+        //     "Current: {:.2}s ({})",
+        //     state.current_time, state.current_pts
+        // );
+        //
+        // println!(
+        //     "Target : {:.2}s ({})",
+        //     state.seek_target_secs,
+        //     secs_to_timestamp(state.seek_target_secs, time_base)
+        // );
+        //
         while state.is_paused {
             if let Event::Key(key) = read()? {
                 if key.code == KeyCode::Char(' ') {
@@ -312,7 +312,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 &mut state,
             )?;
 
+            let seek_time_tb = secs_to_timestamp(state.seek_target_secs, time_base);
+
             if state.seek_requested {
+                ictx.seek(seek_time_tb, ..seek_time_tb)?;
+                decoder.flush();
+                println!("seeked to = {}", seek_time_tb);
                 break;
             }
 
