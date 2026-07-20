@@ -20,6 +20,8 @@ use std::path::Path;
 use std::thread;
 use std::time::{Duration, Instant};
 
+use crate::PlaybackAction::{Quit, Seek};
+
 fn get_img_path() -> Result<String, String> {
     let args: Vec<String> = env::args().collect();
 
@@ -100,7 +102,7 @@ fn process_frame(
         //     continue;
         // }
     }
-    // print!("{}", ascii_frame);
+    print!("{}", ascii_frame);
     stdout().flush().unwrap();
     Ok(())
 }
@@ -122,7 +124,7 @@ fn drain_decoder(
     scaled: &mut Video,
     time_base: Rational,
     state: &mut PlaybackState,
-) -> Result<(), Box<dyn std::error::Error>> {
+) -> Result<PlaybackAction, Box<dyn std::error::Error>> {
     while decoder.receive_frame(decoded).is_ok() {
         if state.playback_start.is_none() {
             state.playback_start = Some(Instant::now());
@@ -185,7 +187,7 @@ fn drain_decoder(
 
                 if key.code == KeyCode::Char('q') {
                     state.should_quit = true;
-                    return Ok(());
+                    return Ok(PlaybackAction::Quit);
                 }
                 if key.code == KeyCode::Left {
                     state.seek_requested = true;
@@ -213,14 +215,14 @@ fn drain_decoder(
         )?;
 
         if state.seek_requested {
-            return Ok(());
+            return Ok(PlaybackAction::Seek);
         }
 
         if state.should_quit {
-            return Ok(());
+            return Ok(PlaybackAction::Quit);
         }
     }
-    Ok(())
+    Ok(PlaybackAction::EndOfStream)
 }
 
 struct TerminalGuard;
@@ -234,6 +236,13 @@ impl TerminalGuard {
         out.flush()?;
         Ok(Self)
     }
+}
+
+enum PlaybackAction {
+    Continue,
+    Seek,
+    Quit,
+    EndOfStream,
 }
 
 struct PlaybackState {
@@ -299,34 +308,46 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         seek_target_secs: 0.0,
     };
 
-    for (stream, packet) in ictx.packets() {
-        if stream.index() == video_stream_index {
-            decoder.send_packet(&packet)?;
+    loop {
+        for (stream, packet) in ictx.packets() {
+            if stream.index() == video_stream_index {
+                decoder.send_packet(&packet)?;
 
-            drain_decoder(
-                &mut decoded,
-                &mut decoder,
-                &mut scaler,
-                &mut scaled,
-                time_base,
-                &mut state,
-            )?;
+                let action = drain_decoder(
+                    &mut decoded,
+                    &mut decoder,
+                    &mut scaler,
+                    &mut scaled,
+                    time_base,
+                    &mut state,
+                )?;
 
-            let seek_time_tb = secs_to_timestamp(state.seek_target_secs, time_base);
+                let seek_time_tb = secs_to_timestamp(state.seek_target_secs, time_base);
+                match action {
+                    Seek => {
+                        ictx.seek(seek_time_tb, ..seek_time_tb)?;
+                        decoder.flush();
+                        break;
+                    }
+                    Quit => {
+                        break;
+                    }
+                    _ => {}
+                }
 
-            if state.seek_requested {
-                ictx.seek(seek_time_tb, ..seek_time_tb)?;
-                decoder.flush();
-                println!("seeked to = {}", seek_time_tb);
-                break;
-            }
+                if state.seek_requested {
+                    ictx.seek(seek_time_tb, ..seek_time_tb)?;
+                    decoder.flush();
+                    break;
+                }
 
-            if state.should_quit {
-                break;
+                if state.should_quit {
+                    break;
+                }
             }
         }
+        break;
     }
-
     if !state.should_quit {
         decoder.send_eof()?;
 
