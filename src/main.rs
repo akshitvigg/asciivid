@@ -20,8 +20,6 @@ use std::path::Path;
 use std::thread;
 use std::time::{Duration, Instant};
 
-use crate::PlaybackAction::{Quit, Seek};
-
 fn get_img_path() -> Result<String, String> {
     let args: Vec<String> = env::args().collect();
 
@@ -146,21 +144,21 @@ fn drain_decoder(
                     }
                 }
                 if key.code == KeyCode::Char('q') {
-                    state.should_quit = true;
+                    return Ok(PlaybackAction::Quit);
                 }
 
                 if key.code == KeyCode::Left {
-                    state.seek_requested = true;
                     if state.current_time - 5.0 <= 0.0 {
                         state.seek_target_secs = 0.0;
                     } else {
                         state.seek_target_secs = state.current_time - 5.0;
                     }
+                    return Ok(PlaybackAction::Seek);
                 }
 
                 if key.code == KeyCode::Right {
-                    state.seek_requested = true;
                     state.seek_target_secs = state.current_time + 5.0;
+                    return Ok(PlaybackAction::Seek);
                 }
             }
         }
@@ -186,21 +184,20 @@ fn drain_decoder(
                 }
 
                 if key.code == KeyCode::Char('q') {
-                    state.should_quit = true;
                     return Ok(PlaybackAction::Quit);
                 }
                 if key.code == KeyCode::Left {
-                    state.seek_requested = true;
                     if state.current_time - 5.0 <= 0.0 {
                         state.seek_target_secs = 0.0;
                     } else {
                         state.seek_target_secs = state.current_time - 5.0;
                     }
+                    return Ok(PlaybackAction::Seek);
                 }
 
                 if key.code == KeyCode::Right {
-                    state.seek_requested = true;
                     state.seek_target_secs = state.current_time + 5.0;
+                    return Ok(PlaybackAction::Seek);
                 }
             }
         }
@@ -213,16 +210,8 @@ fn drain_decoder(
             state.total_paused,
             state.current_time,
         )?;
-
-        if state.seek_requested {
-            return Ok(PlaybackAction::Seek);
-        }
-
-        if state.should_quit {
-            return Ok(PlaybackAction::Quit);
-        }
     }
-    Ok(PlaybackAction::EndOfStream)
+    Ok(PlaybackAction::Continue)
 }
 
 struct TerminalGuard;
@@ -242,7 +231,6 @@ enum PlaybackAction {
     Continue,
     Seek,
     Quit,
-    EndOfStream,
 }
 
 struct PlaybackState {
@@ -250,10 +238,8 @@ struct PlaybackState {
     total_paused: Duration,
     pause_started: Option<Instant>,
     is_paused: bool,
-    should_quit: bool,
     current_pts: i64,
     current_time: f64,
-    seek_requested: bool,
     seek_target_secs: f64,
 }
 
@@ -301,54 +287,39 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         total_paused: Duration::ZERO,
         pause_started: None,
         is_paused: false,
-        should_quit: false,
         current_pts: 0,
         current_time: 0.0,
-        seek_requested: false,
         seek_target_secs: 0.0,
     };
 
-    loop {
+    'playback: loop {
         for (stream, packet) in ictx.packets() {
-            if stream.index() == video_stream_index {
-                decoder.send_packet(&packet)?;
+            if stream.index() != video_stream_index {
+                continue;
+            }
 
-                let action = drain_decoder(
-                    &mut decoded,
-                    &mut decoder,
-                    &mut scaler,
-                    &mut scaled,
-                    time_base,
-                    &mut state,
-                )?;
+            decoder.send_packet(&packet)?;
 
-                let seek_time_tb = secs_to_timestamp(state.seek_target_secs, time_base);
-                match action {
-                    Seek => {
-                        ictx.seek(seek_time_tb, ..seek_time_tb)?;
-                        decoder.flush();
-                        break;
-                    }
-                    Quit => {
-                        break;
-                    }
-                    _ => {}
-                }
+            let action = drain_decoder(
+                &mut decoded,
+                &mut decoder,
+                &mut scaler,
+                &mut scaled,
+                time_base,
+                &mut state,
+            )?;
 
-                if state.seek_requested {
-                    ictx.seek(seek_time_tb, ..seek_time_tb)?;
+            match action {
+                PlaybackAction::Continue => {}
+                PlaybackAction::Seek => {
+                    let seek_time = secs_to_timestamp(state.seek_target_secs, time_base);
+                    ictx.seek(seek_time, ..seek_time)?;
                     decoder.flush();
-                    break;
+                    continue 'playback;
                 }
-
-                if state.should_quit {
-                    break;
-                }
+                PlaybackAction::Quit => return Ok(()),
             }
         }
-        break;
-    }
-    if !state.should_quit {
         decoder.send_eof()?;
 
         drain_decoder(
@@ -359,8 +330,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             time_base,
             &mut state,
         )?;
-    }
 
+        break;
+    }
     Ok(())
 }
 
