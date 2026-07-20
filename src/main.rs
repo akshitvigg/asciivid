@@ -43,7 +43,7 @@ fn brightness_to_ascii(brightness: u16) -> char {
 }
 
 fn brightness(r: u8, g: u8, b: u8) -> u16 {
-    (r as u16 + g as u16 + b as u16) / 3
+    (0.2126 * r as f32 + 0.7152 * g as f32 + 0.0722 * b as f32) as u16
 }
 
 fn rgb_at(frame: &Video, x: usize, y: usize) -> (u8, u8, u8) {
@@ -105,11 +105,6 @@ fn process_frame(
     Ok(())
 }
 
-fn secs_to_timestamp(secs: f64, time_base: Rational) -> i64 {
-    let tb = time_base.0 as f64 / time_base.1 as f64;
-    (secs / tb).round() as i64
-}
-
 fn pts_to_secs(pts: i64, time_base: Rational) -> f64 {
     let secs = (pts as f64 * f64::from(time_base.0)) / f64::from(time_base.1);
     secs
@@ -124,16 +119,20 @@ fn drain_decoder(
     state: &mut PlaybackState,
 ) -> Result<PlaybackAction, Box<dyn std::error::Error>> {
     while decoder.receive_frame(decoded).is_ok() {
-        if state.playback_start.is_none() {
-            state.playback_start = Some(Instant::now());
-        }
-
-        let playback_start = state.playback_start.unwrap();
-
         if let Some(pts) = decoded.pts() {
             state.current_pts = pts;
             state.current_time = pts_to_secs(pts, time_base);
         }
+
+        if state.playback_start.is_none() {
+            // Anchor the real-time clock to the frame's own timestamp,
+            // so it doesn't matter whether this is frame 0 or a post-seek frame.
+            state.playback_start =
+                Some(Instant::now() - Duration::from_secs_f64(state.current_time));
+            state.total_paused = Duration::ZERO;
+        }
+
+        let playback_start = state.playback_start.unwrap();
 
         if poll(Duration::ZERO)? {
             if let Event::Key(key) = read()? {
@@ -273,7 +272,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         RGB24,
         _w as u32,
         _h as u32,
-        Flags::BILINEAR,
+        Flags::LANCZOS,
     )?;
 
     let mut scaled = Video::empty();
@@ -312,9 +311,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             match action {
                 PlaybackAction::Continue => {}
                 PlaybackAction::Seek => {
-                    let seek_time = secs_to_timestamp(state.seek_target_secs, time_base);
+                    let seek_time = (state.seek_target_secs * 1_000_000.0) as i64;
                     ictx.seek(seek_time, ..seek_time)?;
                     decoder.flush();
+                    state.playback_start = None;
                     continue 'playback;
                 }
                 PlaybackAction::Quit => return Ok(()),
