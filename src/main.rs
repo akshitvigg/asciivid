@@ -56,6 +56,19 @@ fn rgb_at(frame: &Video, x: usize, y: usize) -> (u8, u8, u8) {
     (r, g, b)
 }
 
+fn open_input(source: &str) -> Result<ffmpeg_next::format::context::Input, ffmpeg_next::Error> {
+    let path = Path::new(&source);
+    input(path)
+}
+
+fn is_youtube_url(input: &str) -> bool {
+    if input.starts_with("https://") && input.contains("yout") {
+        return true;
+    } else {
+        return false;
+    }
+}
+
 fn process_frame(
     decoded: &Video,
     scaler: &mut Context,
@@ -249,9 +262,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     ffmpeg_next::init()?;
 
-    let path = Path::new(&pathdemo);
+    print!("{}", is_youtube_url(&pathdemo));
 
-    let mut ictx = input(path)?;
+    let mut ictx = open_input(pathdemo.as_str())?;
 
     let input_stream = ictx
         .streams()
