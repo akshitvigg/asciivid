@@ -4,6 +4,7 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+anyhow = "1.0.104"
 crossterm = "0.29.0"
 ffmpeg-next = "8.1.0"
 image = "0.25.10"

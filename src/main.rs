@@ -1,3 +1,4 @@
+use anyhow::{Result, bail};
 use crossterm::cursor::{Hide, Show};
 use crossterm::event::Event::{self};
 use crossterm::event::{KeyCode, poll, read};
@@ -8,7 +9,7 @@ use crossterm::terminal::{
 };
 use ffmpeg_next::decoder::Video as VideoDecoder;
 use ffmpeg_next::format::Pixel::RGB24;
-use ffmpeg_next::format::input;
+use ffmpeg_next::format::{input, stream};
 use ffmpeg_next::frame::Video;
 use ffmpeg_next::media::Type::{self};
 use ffmpeg_next::software::scaling::{Context, Flags};
@@ -17,6 +18,7 @@ use std::env;
 use std::fmt::Write;
 use std::io::{Write as IOWrite, stdout};
 use std::path::Path;
+use std::process::Command;
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -56,16 +58,38 @@ fn rgb_at(frame: &Video, x: usize, y: usize) -> (u8, u8, u8) {
     (r, g, b)
 }
 
-fn open_input(source: &str) -> Result<ffmpeg_next::format::context::Input, ffmpeg_next::Error> {
-    let path = Path::new(&source);
-    input(path)
+fn open_input(source: &str) -> anyhow::Result<ffmpeg_next::format::context::Input> {
+    if is_youtube_url(source) {
+        let stream_url = get_video_stream_url(source)?;
+        let ictx = input(&stream_url)?;
+        Ok(ictx)
+    } else {
+        let path = Path::new(&source);
+        let ictx = input(path)?;
+        Ok(ictx)
+    }
 }
 
 fn is_youtube_url(input: &str) -> bool {
-    if input.starts_with("https://") && input.contains("yout") {
-        return true;
+    input.starts_with("https://") && input.contains("youtube.com")
+}
+
+fn get_video_stream_url(url: &str) -> Result<String> {
+    let stream_url = Command::new("yt-dlp")
+        .args(["-g", "-f", "bv*[ext=mp4]/bv", url])
+        .output()?;
+
+    if stream_url.status.success() {
+        Ok(String::from_utf8_lossy(&stream_url.stdout)
+            .trim()
+            .to_string())
     } else {
-        return false;
+        bail!(
+            "{}",
+            String::from_utf8_lossy(&stream_url.stderr)
+                .trim()
+                .to_string()
+        )
     }
 }
 
@@ -260,9 +284,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let (_w, _h) = size()?;
     let pathdemo = get_img_path()?;
 
-    ffmpeg_next::init()?;
+    // print!("{}", is_youtube_url(&pathdemo));
+    print!(
+        "{:?}",
+        get_video_stream_url("https://www.youtube.com/watch?v=lg8nR4-nmfg")
+    );
 
-    print!("{}", is_youtube_url(&pathdemo));
+    ffmpeg_next::init()?;
 
     let mut ictx = open_input(pathdemo.as_str())?;
 
