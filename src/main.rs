@@ -1,4 +1,4 @@
-use anyhow::{Result, bail};
+use anyhow::{Result, anyhow, bail};
 use crossterm::cursor::{Hide, Show};
 use crossterm::event::Event::{self};
 use crossterm::event::{KeyCode, poll, read};
@@ -22,16 +22,22 @@ use std::process::Command;
 use std::thread;
 use std::time::{Duration, Instant};
 
-fn get_img_path() -> Result<String, String> {
+fn get_video_path() -> Result<String> {
     let args: Vec<String> = env::args().collect();
 
-    if args.len() < 2 {
-        println!("add image path");
-        return Err("add image path".to_string());
+    if args.len() != 2 {
+        bail!(
+            "\
+Usage:
+    asciivid <video-file|youtube-url>
+
+Examples:
+    asciivid movie.mp4
+    asciivid https://youtu.be/dQw4w9WgXcQ"
+        );
     }
 
-    let image_name = &args[1];
-    Ok(image_name.to_string())
+    Ok(args[1].clone())
 }
 
 const RAMP: &str = " .,:;irsXA253hMHGS#9B&@";
@@ -40,8 +46,7 @@ const MAGIC_NUM: f64 = (RAMP.len() - 1) as f64 / 255.0;
 fn brightness_to_ascii(brightness: u16) -> char {
     let ramp_ind = (brightness) as f64 * MAGIC_NUM;
     let ramp_abs = ramp_ind.round();
-    let ascii_char = RAMP.as_bytes()[ramp_abs as usize] as char;
-    ascii_char
+    RAMP.as_bytes()[ramp_abs as usize] as char
 }
 
 fn brightness(r: u8, g: u8, b: u8) -> u16 {
@@ -57,9 +62,22 @@ fn rgb_at(frame: &Video, x: usize, y: usize) -> (u8, u8, u8) {
     let b = rgb_plane[row + offset + 2].to_owned();
     (r, g, b)
 }
+fn check_yt_dlp() -> Result<()> {
+    Command::new("yt-dlp")
+        .arg("--version")
+        .output()
+        .map_err(|_| {
+            anyhow!(
+                "yt-dlp is not installed or not found in PATH.\n\
+                 Please install yt-dlp before using YouTube URLs."
+            )
+        })?;
 
+    Ok(())
+}
 fn open_input(source: &str) -> anyhow::Result<ffmpeg_next::format::context::Input> {
     let ictx = if is_youtube_url(source) {
+        check_yt_dlp()?;
         let stream_url = get_video_stream_url(source)?;
         input(&stream_url)?
     } else {
@@ -69,18 +87,23 @@ fn open_input(source: &str) -> anyhow::Result<ffmpeg_next::format::context::Inpu
 }
 
 fn is_youtube_url(input: &str) -> bool {
-    input.starts_with("https://") && input.contains("youtube.com")
+    input.starts_with("https://") && input.contains("youtube.com") || input.contains("youtu.be")
 }
 
 fn get_video_stream_url(url: &str) -> Result<String> {
     let stream_url = Command::new("yt-dlp")
-        .args(["-g", "-f", "bv*[ext=mp4]/bv", url])
+        .args(["--no-playlist", "-g", "-f", "bv*[ext=mp4]/bv", url])
         .output()?;
 
     if stream_url.status.success() {
-        Ok(String::from_utf8_lossy(&stream_url.stdout)
-            .trim()
-            .to_string())
+        let url = String::from_utf8_lossy(&stream_url.stdout);
+
+        let first_url = url
+            .lines()
+            .next()
+            .ok_or_else(|| anyhow!("yt-dlp returned no URLs"))?;
+
+        Ok(first_url.to_owned())
     } else {
         bail!(
             "{}",
@@ -109,7 +132,7 @@ fn process_frame(
 
     for y in 0..scaled.height() {
         for x in 0..scaled.width() {
-            let (r, g, b) = rgb_at(&scaled, x as usize, y as usize);
+            let (r, g, b) = rgb_at(scaled, x as usize, y as usize);
             let brightness = brightness(r, g, b);
 
             let ascii_char = brightness_to_ascii(brightness);
@@ -120,7 +143,10 @@ fn process_frame(
             )
             .unwrap();
         }
-        ascii_frame.push_str("\r\n");
+
+        if y + 1 != scaled.height() {
+            ascii_frame.push_str("\r\n");
+        }
     }
 
     let real_elapsed_secs = (Instant::now() - playback_start - total_paused).as_secs_f64();
@@ -141,8 +167,7 @@ fn process_frame(
 }
 
 fn pts_to_secs(pts: i64, time_base: Rational) -> f64 {
-    let secs = (pts as f64 * f64::from(time_base.0)) / f64::from(time_base.1);
-    secs
+    (pts as f64 * f64::from(time_base.0)) / f64::from(time_base.1)
 }
 
 fn drain_decoder(
@@ -197,17 +222,6 @@ fn drain_decoder(
             }
         }
 
-        // println!(
-        //     "Current: {:.2}s ({})",
-        //     state.current_time, state.current_pts
-        // );
-        //
-        // println!(
-        //     "Target : {:.2}s ({})",
-        //     state.seek_target_secs,
-        //     secs_to_timestamp(state.seek_target_secs, time_base)
-        // );
-        //
         while state.is_paused {
             if let Event::Key(key) = read()? {
                 if key.code == KeyCode::Char(' ') {
@@ -280,7 +294,7 @@ struct PlaybackState {
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let _guard = TerminalGuard::new()?;
     let (_w, _h) = size()?;
-    let pathdemo = get_img_path()?;
+    let pathdemo = get_video_path()?;
 
     ffmpeg_next::init()?;
 
