@@ -9,7 +9,7 @@ use crossterm::terminal::{
 };
 use ffmpeg_next::decoder::Video as VideoDecoder;
 use ffmpeg_next::format::Pixel::RGB24;
-use ffmpeg_next::format::{input, stream};
+use ffmpeg_next::format::input;
 use ffmpeg_next::frame::Video;
 use ffmpeg_next::media::Type::{self};
 use ffmpeg_next::software::scaling::{Context, Flags};
@@ -59,15 +59,13 @@ fn rgb_at(frame: &Video, x: usize, y: usize) -> (u8, u8, u8) {
 }
 
 fn open_input(source: &str) -> anyhow::Result<ffmpeg_next::format::context::Input> {
-    if is_youtube_url(source) {
+    let ictx = if is_youtube_url(source) {
         let stream_url = get_video_stream_url(source)?;
-        let ictx = input(&stream_url)?;
-        Ok(ictx)
+        input(&stream_url)?
     } else {
-        let path = Path::new(&source);
-        let ictx = input(path)?;
-        Ok(ictx)
-    }
+        input(Path::new(source))?
+    };
+    Ok(ictx)
 }
 
 fn is_youtube_url(input: &str) -> bool {
@@ -283,12 +281,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let _guard = TerminalGuard::new()?;
     let (_w, _h) = size()?;
     let pathdemo = get_img_path()?;
-
-    // print!("{}", is_youtube_url(&pathdemo));
-    print!(
-        "{:?}",
-        get_video_stream_url("https://www.youtube.com/watch?v=lg8nR4-nmfg")
-    );
 
     ffmpeg_next::init()?;
 
